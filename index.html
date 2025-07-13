@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Draw the Perfect Square</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: #111;
+      color: #0f0; /* electric green */
+      font-family: 'Orbitron', sans-serif;
+      user-select: none;
+      transition: background 0.8s ease, color 0.8s ease;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      border: 2px solid #0f0;
+      background: #222;
+      cursor: crosshair;
+      display: block;
+      margin-top: 20px;
+      transition: background 0.8s ease, border-color 0.8s ease;
+    }
+    #score {
+      font-size: 28px;
+      margin-top: 15px;
+      color: #0f0;
+      min-height: 40px;
+    }
+    #controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 15px;
+      font-size: 18px;
+      align-items: center;
+    }
+    label {
+      cursor: pointer;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h1>DRAW THE PERFECT SQUARE ⬜</h1>
+    <p>Use your mouse to draw a square. Accuracy matters!</p>
+    <canvas id="canvas" width="500" height="500"></canvas>
+    <div id="score"></div>
+    <div id="controls">
+      <label><input type="checkbox" id="darkmode" checked /> Dark Mode</label>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const darkmodeCheckbox = document.getElementById('darkmode');
+    const container = document.getElementById('container');
+
+    let drawing = false;
+    let path = [];
+    let startTime = 0;
+
+    const penaltyCenterBoxSize = 40;  // smaller center box
+    const penaltyCenterBuffer = 15;   // bigger buffer for penalty near center
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawCenterBox() {
+      const size = penaltyCenterBoxSize;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
+    }
+
+    function addPoint(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      path.push([x, y]);
+    }
+
+    function redrawPath() {
+      clearCanvas();
+      drawCenterBox();
+
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      path.forEach(([x, y], i) => {
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function outOfBounds(point) {
+      const [x, y] = point;
+      return (
+        x < 0 || x > canvas.width || y < 0 || y > canvas.height
+      );
+    }
+
+    function nearLeftPenaltyLine(point) {
+      const [x, y] = point;
+      return x < 10;
+    }
+
+    function insidePenaltyZone(point) {
+      const [x, y] = point;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const halfSize = penaltyCenterBoxSize / 2 + penaltyCenterBuffer;
+      return (
+        x > cx - halfSize &&
+        x < cx + halfSize &&
+        y > cy - halfSize &&
+        y < cy + halfSize
+      );
+    }
+
+    function stopGameWithMessage(msg) {
+      scoreEl.textContent = msg;
+      drawing = false;
+    }
+
+    function updateScore(text) {
+      scoreEl.textContent = text;
+    }
+
+    function scorePathLive() {
+      if (path.length < 10) {
+        updateScore('Square-ness: 0.00%');
+        return;
+      }
+
+      const elapsed = (Date.now() - startTime) / 1000;
+
+      if (elapsed > 10) {
+        stopGameWithMessage('Invalid run: Took too long (>10s)');
+        return;
+      }
+
+      for (const p of path) {
+        if (outOfBounds(p) || nearLeftPenaltyLine(p)) {
+          stopGameWithMessage('Invalid run: Out of bounds');
+          return;
+        }
+      }
+
+      for (const p of path) {
+        if (insidePenaltyZone(p)) {
+          stopGameWithMessage('Invalid run: Too close to center box');
+          return;
+        }
+      }
+
+      let minX = Math.min(...path.map(p => p[0]));
+      let maxX = Math.max(...path.map(p => p[0]));
+      let minY = Math.min(...path.map(p => p[1]));
+      let maxY = Math.max(...path.map(p => p[1]));
+
+      const width = maxX - minX;
+      const height = maxY - minY;
+      const ratio = width > height ? height / width : width / height;
+
+      let totalDist = 0;
+      for (let i = 1; i < path.length; i++) {
+        const dx = path[i][0] - path[i - 1][0];
+        const dy = path[i][1] - path[i - 1][1];
+        totalDist += Math.sqrt(dx * dx + dy * dy);
+      }
+      const perimeter = 2 * (width + height);
+      const messiness = totalDist / perimeter;
+
+      let messinessPenalty = 0;
+      if (messiness > 1.2) messinessPenalty = (messiness - 1.2) * 50;
+
+      let score = 100 * ratio - messinessPenalty;
+      if (score < 0) score = 0;
+
+      updateScore(`Square-ness: ${score.toFixed(2)}%`);
+    }
+
+    function resetGame() {
+      path = [];
+      clearCanvas();
+      drawCenterBox();
+      updateScore('Square-ness: 0.00%');
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      drawing = true;
+      path = [];
+      startTime = Date.now();
+      clearCanvas();
+      drawCenterBox();
+      addPoint(e);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing) return;
+      addPoint(e);
+      redrawPath();
+      scorePathLive();
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      drawing = false;
+      scorePathLive();
+    });
+
+    darkmodeCheckbox.addEventListener('change', () => {
+      if (darkmodeCheckbox.checked) {
+        document.body.style.background = '#111';
+        document.body.style.color = '#0f0';
+        canvas.style.background = '#222';
+        canvas.style.borderColor = '#0f0';
+        scoreEl.style.color = '#0f0';
+      } else {
+        document.body.style.background = '#eee';
+        document.body.style.color = '#080';
+        canvas.style.background = '#fff';
+        canvas.style.borderColor = '#080';
+        scoreEl.style.color = '#080';
+      }
+    });
+
+    resetGame();
+  </script>
+</body>
+</html>
