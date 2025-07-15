@@ -14,7 +14,7 @@
       justify-content: center;
       align-items: center;
       background: #111;
-      color: #0f0; /* electric green */
+      color: #0f0;
       font-family: 'Orbitron', sans-serif;
       user-select: none;
       transition: background 0.8s ease, color 0.8s ease;
@@ -67,21 +67,17 @@
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
     const darkmodeCheckbox = document.getElementById('darkmode');
-    const container = document.getElementById('container');
 
     let drawing = false;
     let path = [];
     let startTime = 0;
-
-    const penaltyCenterBoxSize = 40;  // smaller center box
-    const penaltyCenterBuffer = 15;   // bigger buffer for penalty near center
 
     function clearCanvas() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
     function drawCenterBox() {
-      const size = penaltyCenterBoxSize;
+      const size = 40;
       const cx = canvas.width / 2;
       const cy = canvas.height / 2;
       ctx.strokeStyle = '#0f0';
@@ -99,7 +95,6 @@
     function redrawPath() {
       clearCanvas();
       drawCenterBox();
-
       ctx.strokeStyle = '#0f0';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -110,99 +105,94 @@
       ctx.stroke();
     }
 
-    function outOfBounds(point) {
-      const [x, y] = point;
-      return (
-        x < 0 || x > canvas.width || y < 0 || y > canvas.height
-      );
+    function getAngle(a, b, c) {
+      const ab = [b[0] - a[0], b[1] - a[1]];
+      const bc = [c[0] - b[0], c[1] - b[1]];
+      const dot = ab[0] * bc[0] + ab[1] * bc[1];
+      const magAb = Math.sqrt(ab[0] ** 2 + ab[1] ** 2);
+      const magBc = Math.sqrt(bc[0] ** 2 + bc[1] ** 2);
+      const cosine = dot / (magAb * magBc);
+      return Math.acos(Math.max(-1, Math.min(1, cosine)));
     }
 
-    function nearLeftPenaltyLine(point) {
-      const [x, y] = point;
-      return x < 10;
+    function simplifyPath(path, tolerance = 7) {
+      const simplified = [path[0]];
+      for (let i = 1; i < path.length; i++) {
+        const [x1, y1] = simplified[simplified.length - 1];
+        const [x2, y2] = path[i];
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        if (Math.sqrt(dx * dx + dy * dy) > tolerance) {
+          simplified.push([x2, y2]);
+        }
+      }
+      return simplified;
     }
 
-    function insidePenaltyZone(point) {
-      const [x, y] = point;
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
-      const halfSize = penaltyCenterBoxSize / 2 + penaltyCenterBuffer;
-      return (
-        x > cx - halfSize &&
-        x < cx + halfSize &&
-        y > cy - halfSize &&
-        y < cy + halfSize
-      );
+    function detectCorners(simplified) {
+      const corners = [];
+      const threshold = 0.8; // leniency
+      for (let i = 1; i < simplified.length - 1; i++) {
+        const angle = getAngle(simplified[i - 1], simplified[i], simplified[i + 1]);
+        if (Math.abs(Math.PI / 2 - angle) < threshold) {
+          corners.push(simplified[i]);
+        }
+      }
+      return corners;
     }
 
-    function stopGameWithMessage(msg) {
-      scoreEl.textContent = msg;
-      drawing = false;
-    }
-
-    function updateScore(text) {
-      scoreEl.textContent = text;
-    }
-
-    function scorePathLive() {
+    function scoreSquare() {
       if (path.length < 10) {
-        updateScore('Square-ness: 0.00%');
+        scoreEl.textContent = 'Square-ness: 0.00%';
         return;
       }
 
       const elapsed = (Date.now() - startTime) / 1000;
-
       if (elapsed > 10) {
-        stopGameWithMessage('Invalid run: Took too long (>10s)');
+        scoreEl.textContent = 'Invalid: Took too long (>10s)';
         return;
       }
 
-      for (const p of path) {
-        if (outOfBounds(p) || nearLeftPenaltyLine(p)) {
-          stopGameWithMessage('Invalid run: Out of bounds');
-          return;
-        }
-      }
+      const simplified = simplifyPath(path);
+      const corners = detectCorners(simplified);
 
-      for (const p of path) {
-        if (insidePenaltyZone(p)) {
-          stopGameWithMessage('Invalid run: Too close to center box');
-          return;
-        }
-      }
+      // Inside scoreSquare() function:
+    if (corners.length < 3 || corners.length > 5) {
+     scoreEl.textContent = `Invalid: Found ${corners.length} corners, expected around 4 (3–5 allowed)`;
+     return;
+    }
 
-      let minX = Math.min(...path.map(p => p[0]));
-      let maxX = Math.max(...path.map(p => p[0]));
-      let minY = Math.min(...path.map(p => p[1]));
-      let maxY = Math.max(...path.map(p => p[1]));
 
-      const width = maxX - minX;
-      const height = maxY - minY;
+      // Bounding box
+      const xs = path.map(p => p[0]);
+      const ys = path.map(p => p[1]);
+      const width = Math.max(...xs) - Math.min(...xs);
+      const height = Math.max(...ys) - Math.min(...ys);
       const ratio = width > height ? height / width : width / height;
 
+      // Path length vs box perimeter
       let totalDist = 0;
       for (let i = 1; i < path.length; i++) {
         const dx = path[i][0] - path[i - 1][0];
         const dy = path[i][1] - path[i - 1][1];
-        totalDist += Math.sqrt(dx * dx + dy * dy);
+        totalDist += Math.sqrt(dx ** 2 + dy ** 2);
       }
       const perimeter = 2 * (width + height);
       const messiness = totalDist / perimeter;
-
       let messinessPenalty = 0;
-      if (messiness > 1.2) messinessPenalty = (messiness - 1.2) * 50;
+      if (messiness > 1.3) messinessPenalty = (messiness - 1.3) * 50;
 
       let score = 100 * ratio - messinessPenalty;
       if (score < 0) score = 0;
 
-      updateScore(`Square-ness: ${score.toFixed(2)}%`);
+      scoreEl.textContent = `Square-ness: ${score.toFixed(2)}%`;
     }
 
     function resetGame() {
       path = [];
       clearCanvas();
       drawCenterBox();
-      updateScore('Square-ness: 0.00%');
+      scoreEl.textContent = 'Square-ness: 0.00%';
     }
 
     canvas.addEventListener('mousedown', (e) => {
@@ -218,28 +208,20 @@
       if (!drawing) return;
       addPoint(e);
       redrawPath();
-      scorePathLive();
     });
 
     canvas.addEventListener('mouseup', (e) => {
       drawing = false;
-      scorePathLive();
+      scoreSquare();
     });
 
     darkmodeCheckbox.addEventListener('change', () => {
-      if (darkmodeCheckbox.checked) {
-        document.body.style.background = '#111';
-        document.body.style.color = '#0f0';
-        canvas.style.background = '#222';
-        canvas.style.borderColor = '#0f0';
-        scoreEl.style.color = '#0f0';
-      } else {
-        document.body.style.background = '#eee';
-        document.body.style.color = '#080';
-        canvas.style.background = '#fff';
-        canvas.style.borderColor = '#080';
-        scoreEl.style.color = '#080';
-      }
+      const dark = darkmodeCheckbox.checked;
+      document.body.style.background = dark ? '#111' : '#eee';
+      document.body.style.color = dark ? '#0f0' : '#080';
+      canvas.style.background = dark ? '#222' : '#fff';
+      canvas.style.borderColor = dark ? '#0f0' : '#080';
+      scoreEl.style.color = dark ? '#0f0' : '#080';
     });
 
     resetGame();
